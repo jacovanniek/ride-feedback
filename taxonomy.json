@@ -1,0 +1,12 @@
+{
+  "app_version": "2026-10-16",
+  "disciplines": {
+    "Moto":       { "activities": ["ADV", "Enduro", "Rally", "MX"], "crash": true,  "crash_types": ["lowside", "highside", "wash-out", "rear-end", "other"], "free_text": false },
+    "MTB":        { "activities": ["XC", "Enduro", "DH"],            "crash": true,  "crash_types": ["over-the-bars", "wash-out", "other"],                 "free_text": false },
+    "Equestrian": { "activities": ["Show Jumping", "Eventing/Cross-Country", "Dressage", "Endurance", "Racing", "Trail/Hacking", "Other"], "crash": true, "crash_types": ["fall", "unseated", "other"], "free_text": false },
+    "Aviation":   { "activities": ["Aerobatics"],                    "crash": false, "crash_types": [],                                                     "free_text": false },
+    "Other":      { "activities": [],                                "crash": false, "crash_types": [],                                                     "free_text": true }
+  },
+  "severities": ["none", "minor", "moderate", "severe"],
+  "riders": ["Jaco van Niekerk"]
+}

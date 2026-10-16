@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:mso="urn:schemas-microsoft-com:office:office" xmlns:msdt="uuid:C2F41010-65B3-11d1-A29F-00AA00C14882">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>x-IMU3 Ride Feedback</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; text-align: center; }
+  #reader { width: 100%; max-width: 320px; margin: 0 auto; }
+  form { max-width: 420px; margin: 20px auto; display: flex; flex-direction: column; text-align: left; }
+  label { margin-top: 12px; font-weight: bold; }
+  input, select, textarea { margin: 6px 0; padding: 10px; font-size: 16px; }
+  input[type="submit"] { background:#e02525; color:#fff; border:none; padding:12px; cursor:pointer; margin-top:16px; }
+  input[type="submit"]:hover { background: darkred; }
+  #rescanBtn { background: gray; color:#fff; border:none; padding:10px; cursor:pointer; }
+  .hidden { display: none; }
+  .spinner { border:4px solid rgba(0,0,0,.1); border-top:4px solid #e02525; border-radius:50%;
+             width:30px; height:30px; animation:spin 1s linear infinite; margin:20px auto; }
+  @keyframes spin { 0%{transform:rotate(0)} 100%{transform:rotate(360deg)} }
+</style>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+<!--[if gte mso 9]><xml>
+<mso:CustomDocumentProperties>
+<mso:_ApprovalStatus msdt:dt="string">0</mso:_ApprovalStatus>
+<mso:_ApprovalAssignedTo msdt:dt="string"></mso:_ApprovalAssignedTo>
+<mso:_ApprovalRespondedBy msdt:dt="string"></mso:_ApprovalRespondedBy>
+<mso:_ApprovalSentBy msdt:dt="string"></mso:_ApprovalSentBy>
+</mso:CustomDocumentProperties>
+</xml><![endif]-->
+</head>
+<body>
+  <img src="leatt-logo-2.jpg" alt="Logo" style="position:absolute; top:10px; left:10px; width:100px; height:auto;">
+  <h1 style="margin-top:120px;">Ride feedback</h1>
+  <p id="intro">Scan the QR on your datalogger (backside / under the straps), then tell us about your ride.</p>
+
+  <div id="reader"></div>
+
+  <form id="rideForm">
+    <label for="serial">Datalogger serial</label>
+    <input type="text" id="serial" name="serial" required>
+
+    <label for="rider_name">Rider</label>
+    <select id="rider_name" name="rider_name" required></select>
+    <input type="text" id="rider_new" class="hidden" placeholder="Enter new rider name">
+
+    <label for="discipline">Discipline</label>
+    <select id="discipline" name="discipline" required></select>
+
+    <label for="activity_type">Activity type</label>
+    <select id="activity_type" name="activity_type"></select>
+
+    <div id="otherWrap" class="hidden">
+      <label for="other_detail">Please specify</label>
+      <input type="text" id="other_detail" name="other_detail">
+    </div>
+
+    <div id="crashWrap" class="hidden">
+      <label for="crash">Did you have a crash / fall?</label>
+      <select id="crash" name="crash">
+        <option value="No">No</option>
+        <option value="Yes">Yes</option>
+      </select>
+
+      <div id="crashDetails" class="hidden">
+        <label for="crash_time">Approx time of crash (HH:MM)</label>
+        <select id="crash_time" name="crash_time"></select>
+
+        <label for="crash_type">Crash type</label>
+        <select id="crash_type" name="crash_type"></select>
+
+        <label for="severity">Severity</label>
+        <select id="severity" name="severity"></select>
+
+        <label for="description">What happened? (optional)</label>
+        <textarea id="description" name="description" rows="3"></textarea>
+      </div>
+    </div>
+
+    <input type="hidden" id="app_version" name="app_version" value="">
+    <input type="submit" value="Submit">
+    <button type="button" id="rescanBtn">Rescan</button>
+  </form>
+
+  <p id="responseMessage"></p>
+  <div id="loading" class="hidden"><div class="spinner"></div>Submitting…</div>
+
+<script>
+// ---- CONFIG: set this to the deployed Apps Script /exec URL
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyY7A-kGcfcN_UE4MflI3-S_Xg-4lsGSL8eR_uxJ0AF8UvN1yb1pKpuJ1cAZzUbMkaaEw/exec";
+let TAX = null;
+
+function opt(sel, values, placeholder) {
+  sel.innerHTML = "";
+  if (placeholder) { const o = document.createElement("option"); o.value=""; o.textContent=placeholder; sel.appendChild(o); }
+  values.forEach(v => { const o = document.createElement("option"); o.value=v; o.textContent=v; sel.appendChild(o); });
+}
+
+function fillCrashTimes(sel) {
+  sel.innerHTML = "";
+  for (let m = 0; m < 1440; m += 5) {
+    const hh = String(Math.floor(m/60)).padStart(2,"0"), mm = String(m%60).padStart(2,"0");
+    const o = document.createElement("option"); o.value=`${hh}:${mm}`; o.textContent=`${hh}:${mm}`; sel.appendChild(o);
+  }
+}
+
+function onDisciplineChange() {
+  const disc = document.getElementById("discipline").value;
+  const d = TAX.disciplines[disc] || {activities:[],crash:false,crash_types:[],free_text:false};
+  opt(document.getElementById("activity_type"), d.activities, d.activities.length ? null : "(n/a)");
+  document.getElementById("otherWrap").classList.toggle("hidden", !d.free_text);
+  document.getElementById("crashWrap").classList.toggle("hidden", !d.crash);
+  if (d.crash) opt(document.getElementById("crash_type"), d.crash_types, null);
+  // reset crash answer + details when discipline changes
+  document.getElementById("crash").value = "No";
+  document.getElementById("crashDetails").classList.add("hidden");
+}
+
+window.addEventListener("load", async () => {
+  TAX = await (await fetch("taxonomy.json")).json();
+  document.getElementById("app_version").value = TAX.app_version;
+  // riders dropdown + "add new"
+  opt(document.getElementById("rider_name"), TAX.riders.concat(["(add new)"]), null);
+  document.getElementById("rider_name").addEventListener("change", e => {
+    document.getElementById("rider_new").classList.toggle("hidden", e.target.value !== "(add new)");
+  });
+  // disciplines
+  opt(document.getElementById("discipline"), Object.keys(TAX.disciplines), "Select…");
+  document.getElementById("discipline").addEventListener("change", onDisciplineChange);
+  // crash details
+  fillCrashTimes(document.getElementById("crash_time"));
+  opt(document.getElementById("severity"), TAX.severities, null);
+  document.getElementById("crash").addEventListener("change", e => {
+    document.getElementById("crashDetails").classList.toggle("hidden", e.target.value !== "Yes");
+  });
+});
+
+// ---- QR scanner
+const scanner = new Html5Qrcode("reader", {
+  experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+  formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
+});
+function onScan(text) {
+  document.getElementById("serial").value = text;
+  scanner.stop().then(() => { document.getElementById("reader").style.display = "none"; }).catch(()=>{});
+}
+function startScan() {
+  document.getElementById("reader").style.display = "block";
+  scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScan).catch(e => console.error(e));
+}
+startScan();
+document.getElementById("rescanBtn").addEventListener("click", startScan);
+
+// ---- submit (fire-and-forget, optimistic)
+document.getElementById("rideForm").addEventListener("submit", e => {
+  e.preventDefault();
+  // resolve "add new" rider into rider_name param
+  const riderSel = document.getElementById("rider_name");
+  if (riderSel.value === "(add new)") {
+    const nv = document.getElementById("rider_new").value.trim();
+    if (!nv) { alert("Enter the new rider name."); return; }
+    const o = document.createElement("option"); o.value=nv; o.textContent=nv; o.selected=true; riderSel.appendChild(o);
+  }
+  document.getElementById("reader").style.display = "none";
+  e.target.classList.add("hidden");
+  document.getElementById("intro").classList.add("hidden");
+  document.getElementById("loading").classList.remove("hidden");
+
+  const params = new URLSearchParams(new FormData(e.target));
+  // keep non-crash rows clean: drop the (hidden) crash detail fields unless a crash was reported
+  if (document.getElementById("crash").value !== "Yes") {
+    ["crash_time", "crash_type", "severity", "description"].forEach(k => params.delete(k));
+  }
+  fetch(`${SCRIPT_URL}?${params.toString()}`, { mode: "no-cors" })
+    .finally(() => {
+      document.getElementById("loading").classList.add("hidden");
+      document.getElementById("responseMessage").innerText = "Thank you — feedback submitted.";
+    });
+});
+</script>
+</body>
+</html>
